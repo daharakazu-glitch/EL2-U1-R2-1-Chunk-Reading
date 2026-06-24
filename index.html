@@ -136,6 +136,23 @@
             <div class="w-2.5 h-2.5 bg-slate-600 rounded-sm"></div>
         </button>
 
+        <!-- 再生速度調整スライダー -->
+        <div class="flex items-center gap-2 border border-slate-300 rounded-md bg-white px-3 py-1.5 shadow-sm text-xs font-bold text-slate-700">
+            <i data-lucide="gauge" class="w-3.5 h-3.5 text-slate-500"></i>
+            <span>Speed:</span>
+            <input 
+                id="speed-range" 
+                type="range" 
+                min="0.5" 
+                max="2.0" 
+                step="0.1" 
+                value="1.0" 
+                oninput="handleSpeedChange(event)" 
+                class="w-20 accent-blue-600 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+            />
+            <span id="speed-value" class="w-8 text-blue-600 font-extrabold">x1.0</span>
+        </div>
+
         <!-- Japanese visibility toggle button -->
         <button id="ja-toggle-btn" onclick="toggleJapaneseColumn()" class="border border-slate-300 hover:bg-slate-100 text-slate-700 px-4 py-1.5 rounded-md text-xs font-bold transition flex items-center gap-1">
             <span>文 日本語:</span>
@@ -556,6 +573,7 @@
         let japaneseVisible = true;
         let speechSynth = window.speechSynthesis;
         let isSpeakingPlaylist = false;
+        let isPausedPlaylist = false;
         let activeSpeakerButton = null;
         let activeSpeakerRowIndex = null;
         let activeSpeechIndex = 0;
@@ -563,7 +581,8 @@
         const state = {
             revealedIds: new Set(),
             voices: [],
-            selectedVoice: null
+            selectedVoice: null,
+            speechRate: 1.0
         };
 
         // 音声読み上げリストのセットアップ
@@ -829,6 +848,22 @@
             });
         }
 
+        // Handle speed slider change
+        window.handleSpeedChange = function(event) {
+            const rate = parseFloat(event.target.value);
+            state.speechRate = rate;
+            document.getElementById('speed-value').textContent = `x${rate.toFixed(1)}`;
+            
+            // 再生中の場合は、現在の音声を新しいレートで再生し直す
+            if (isSpeakingPlaylist && !isPausedPlaylist) {
+                speechSynth.cancel();
+                playNextPlaylistSentence();
+            } else if (activeSpeakerButton && activeSpeakerRowIndex !== null) {
+                const currentObj = chunkData[activeSpeakerRowIndex];
+                speakSentence(currentObj.fullSentence, activeSpeakerButton, activeSpeakerRowIndex);
+            }
+        };
+
         // Text-to-speech for single sentence
         function speakSentence(text, btnElement, rowIndex) {
             if (speechSynth.speaking) {
@@ -860,7 +895,7 @@
             if (state.selectedVoice) {
                 utterance.voice = state.selectedVoice;
             }
-            utterance.rate = 1.0;
+            utterance.rate = state.speechRate;
 
             utterance.onend = () => {
                 btnElement.className = "w-8.5 h-8.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 rounded-full flex items-center justify-center text-slate-500 hover:text-blue-600 transition shrink-0 select-none self-center mt-1";
@@ -873,16 +908,24 @@
             speechSynth.speak(utterance);
         }
 
-        // Global TTS Play list
+        // Global TTS Play list (Play / Pause / Resume)
         function toggleGlobalSpeech() {
             if (isSpeakingPlaylist) {
-                stopAllSpeech();
+                // 現在再生中の場合：一時停止 (Pause)
+                speechSynth.cancel();
+                isSpeakingPlaylist = false;
+                isPausedPlaylist = true;
+                updateGlobalPlayButton();
                 return;
             }
 
+            // 再生を開始または再開
             isSpeakingPlaylist = true;
-            activeSpeechIndex = 0;
-            updateGlobalPlayButton(true);
+            if (!isPausedPlaylist) {
+                activeSpeechIndex = 0; // 新規再生
+            }
+            isPausedPlaylist = false;
+            updateGlobalPlayButton();
             playNextPlaylistSentence();
         }
 
@@ -907,7 +950,7 @@
             if (state.selectedVoice) {
                 utterance.voice = state.selectedVoice;
             }
-            utterance.rate = 1.0;
+            utterance.rate = state.speechRate;
 
             utterance.onend = () => {
                 targetRow.classList.remove('bg-blue-50/70');
@@ -918,11 +961,13 @@
             speechSynth.speak(utterance);
         }
 
-        // Stop all speech
+        // Stop all speech (Reset)
         function stopAllSpeech() {
             speechSynth.cancel();
             isSpeakingPlaylist = false;
-            updateGlobalPlayButton(false);
+            isPausedPlaylist = false;
+            activeSpeechIndex = 0;
+            updateGlobalPlayButton();
 
             // Reset highlighted rows
             for (let i = 0; i < chunkData.length; i++) {
@@ -940,16 +985,23 @@
             }
         }
 
-        function updateGlobalPlayButton(isPlaying) {
+        function updateGlobalPlayButton() {
             const playText = document.getElementById('global-play-text');
             const playIcon = document.getElementById('global-play-icon');
             const playBtn = document.getElementById('global-play-btn');
 
-            if (isPlaying) {
-                playText.textContent = "Stop";
-                playIcon.setAttribute('data-lucide', 'square');
-                playBtn.className = "bg-rose-600 hover:bg-rose-700 text-white px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition shadow-sm";
+            if (isSpeakingPlaylist) {
+                // 再生中のとき: ボタンは「Pause」
+                playText.textContent = "Pause";
+                playIcon.setAttribute('data-lucide', 'pause');
+                playBtn.className = "bg-amber-500 hover:bg-amber-600 text-white px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition shadow-sm";
+            } else if (isPausedPlaylist) {
+                // 一時停止中のとき: ボタンは「Resume」
+                playText.textContent = "Resume";
+                playIcon.setAttribute('data-lucide', 'play');
+                playBtn.className = "bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition shadow-sm";
             } else {
+                // 停止状態のとき: ボタンは「Play」
                 playText.textContent = "Play";
                 playIcon.setAttribute('data-lucide', 'play');
                 playBtn.className = "bg-[#2563eb] hover:bg-blue-600 text-white px-4 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 transition shadow-sm";
